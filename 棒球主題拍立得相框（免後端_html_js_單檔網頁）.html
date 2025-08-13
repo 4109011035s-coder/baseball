@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>棒球主題拍立得相框｜免後端</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#11172b; --accent:#f7f7fb; --primary:#4da3ff; --ok:#27c93f; --warn:#ffbd2e; --danger:#ff5f56;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans TC", Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color:var(--accent); background:linear-gradient(180deg,#0b1020,#0e1733 40%,#0b1020);}    
+    .wrap{max-width:1200px; margin:0 auto; padding:20px;}
+    header{display:flex; align-items:center; gap:12px; padding:10px 0 18px;}
+    .logo{width:36px;height:36px;border-radius:12px;background:radial-gradient(circle at 30% 30%,#fff, #ffdede 60%, #f4b5b5 70%);position:relative;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+    .logo:before,.logo:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg, #c72d2d 0 2px, transparent 2px 6px);clip-path:polygon(10% 0, 15% 0, 85% 100%, 80% 100%);opacity:.4}
+    .logo:after{transform:scaleX(-1);}
+    h1{font-size:22px;margin:0}
+    .grid{display:grid;grid-template-columns:1fr 420px; gap:16px;}
+    @media (max-width: 980px){.grid{grid-template-columns:1fr;}}
+    .card{background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.25);}
+    .panel{padding:14px;}
+    .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+    button, .ghost{
+      appearance:none; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06);
+      color:var(--accent); padding:10px 12px; border-radius:12px; cursor:pointer; font-size:14px; backdrop-filter: blur(8px);
+    }
+    button:hover{background:rgba(255,255,255,.12)}
+    button.primary{border-color:transparent; background:linear-gradient(135deg,#5198ff,#7cb0ff)}
+    button.ok{border-color:transparent; background:linear-gradient(135deg,#2fd66f,#60e391)}
+    button.warn{border-color:transparent; background:linear-gradient(135deg,#ffbe2e,#ffd35c)}
+    button.danger{border-color:transparent; background:linear-gradient(135deg,#ff5f56,#ff877f)}
+    .row{display:flex;gap:10px;align-items:center}
+    .hint{font-size:13px;opacity:.75}
+    .stage{position:relative; border-radius:16px; overflow:hidden; aspect-ratio: 4 / 3; background:#000}
+    video{width:100%; height:100%; object-fit:cover; display:block;}
+    canvas{max-width:100%; background:#000; border-radius:16px}
+    .overlay{position:absolute; inset:0; pointer-events:none}
+    .frameSVG{width:100%; height:100%;}
+    .badge{position:absolute; top:10px; left:10px; background:rgba(0,0,0,.5); padding:6px 10px; border-radius:999px; font-size:12px}
+    .stickers{display:flex; gap:8px; flex-wrap:wrap}
+    .sticker{width:48px; height:48px; border-radius:12px; background:rgba(255,255,255,.08); display:grid; place-items:center; user-select:none; cursor:grab}
+    .canvasWrap{position:relative}
+    .draggable{position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); cursor:move;}
+    .ghost{opacity:.7}
+    .side{display:flex; flex-direction:column; gap:12px;}
+    .footer{opacity:.7; font-size:13px; text-align:center; padding:12px}
+    .toggle{display:inline-flex; align-items:center; gap:6px}
+    input[type=range]{width:140px}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo" aria-hidden="true"></div>
+      <h1>棒球主題拍立得相框（免後端 HTML+JS）</h1>
+    </header>
+
+    <div class="grid">
+      <!-- 左：取景／輸出區 -->
+      <section class="card panel">
+        <div class="toolbar">
+          <button id="btnStart" class="primary">啟動鏡頭</button>
+          <button id="btnSwitch">切換前／後鏡頭</button>
+          <label class="toggle"><input type="checkbox" id="chkMirror" checked> 鏡像預覽</label>
+          <label class="toggle"><input type="checkbox" id="chkCountdown"> 3 秒倒數</label>
+          <label class="toggle">相框不透明度 <input id="frameOpacity" type="range" min="40" max="100" value="92"></label>
+          <span class="hint">提示：需 HTTPS 或本機才能開啟鏡頭</span>
+        </div>
+
+        <div class="stage" id="stage">
+          <video id="video" playsinline muted></video>
+          <div class="overlay" id="overlay">
+            <!-- 拍立得風格 + 棒球縫線的相框（SVG，可改色） -->
+            <svg class="frameSVG" viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+              <!-- 拍立得外框 -->
+              <defs>
+                <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#000" flood-opacity="0.35"/>
+                </filter>
+              </defs>
+              <rect x="80" y="40" rx="28" ry="28" width="1040" height="820" fill="white" opacity="0.95" filter="url(#shadow)"/>
+              <!-- 內部取景窗 -->
+              <rect x="130" y="90" rx="18" ry="18" width="940" height="640" fill="transparent" stroke="#e7e7e7" stroke-width="6" />
+              <!-- 下方白邊的活動標題區 -->
+              <g>
+                <rect x="130" y="750" width="940" height="70" fill="#ffffff" opacity="0.95"/>
+                <text x="600" y="795" text-anchor="middle" font-family="'Segoe UI', 'Noto Sans TC', sans-serif" font-size="40" fill="#1b2a4b" font-weight="700">TAIWAN BASEBALL NIGHT</text>
+              </g>
+
+              <!-- 左右兩側棒球縫線裝飾 -->
+              <g stroke="#d23a3a" stroke-width="8" stroke-linecap="round">
+                <!-- 左 -->
+                <path d="M120,120 C180,260 180,560 120,700" fill="none"/>
+                <g>
+                  <path d="M150,180 l40,-18"/>
+                  <path d="M150,230 l40,-18"/>
+                  <path d="M150,280 l40,-18"/>
+                  <path d="M150,330 l40,-18"/>
+                  <path d="M150,380 l40,-18"/>
+                  <path d="M150,430 l40,-18"/>
+                  <path d="M150,480 l40,-18"/>
+                  <path d="M150,530 l40,-18"/>
+                  <path d="M150,580 l40,-18"/>
+                  <path d="M150,630 l40,-18"/>
+                </g>
+                <!-- 右 -->
+                <path d="M1080,120 C1020,260 1020,560 1080,700" fill="none"/>
+                <g>
+                  <path d="M1050,180 l-40,-18"/>
+                  <path d="M1050,230 l-40,-18"/>
+                  <path d="M1050,280 l-40,-18"/>
+                  <path d="M1050,330 l-40,-18"/>
+                  <path d="M1050,380 l-40,-18"/>
+                  <path d="M1050,430 l-40,-18"/>
+                  <path d="M1050,480 l-40,-18"/>
+                  <path d="M1050,530 l-40,-18"/>
+                  <path d="M1050,580 l-40,-18"/>
+                  <path d="M1050,630 l-40,-18"/>
+                </g>
+              </g>
+
+              <!-- 右下角隊徽（T） -->
+              <g transform="translate(980,760)">
+                <circle r="28" fill="#0b1020"/>
+                <text x="0" y="10" text-anchor="middle" font-family="'Segoe UI', 'Noto Sans TC', sans-serif" font-size="40" fill="#ffffff" font-weight="900">T</text>
+              </g>
+            </svg>
+            <div class="badge" id="badge">LIVE • 00:00</div>
+          </div>
+        </div>
+
+        <div class="toolbar" style="margin-top:12px">
+          <button id="btnSnap" class="ok">拍照</button>
+          <button id="btnRetake" class="ghost hidden">重拍</button>
+          <button id="btnDownload" class="warn hidden">下載照片</button>
+          <span class="hint">可拖曳貼圖到畫面；拍照後仍可移動貼圖再下載。</span>
+        </div>
+
+        <div class="canvasWrap">
+          <canvas id="canvas" class="hidden"></canvas>
+          <!-- 拍照完成後，把可拖曳貼圖放在這一層，輸出前會一併合成 -->
+          <div id="stickerLayer" class="overlay hidden"></div>
+        </div>
+      </section>
+
+      <!-- 右：素材與設定 -->
+      <aside class="side">
+        <section class="card panel">
+          <h3 style="margin:6px 0 10px">貼圖素材（點一下加入）</h3>
+          <div class="stickers" id="stickerPalette">
+            <!-- 簡單 SVG 貼圖，點擊加入到畫面，可拖移 -->
+            <div class="sticker" data-svg="ball" title="棒球">
+              ⚾
+            </div>
+            <div class="sticker" data-svg="bat" title="球棒">
+              🦾
+            </div>
+            <div class="sticker" data-svg="capT" title="T 隊帽">
+              🧢
+            </div>
+            <div class="sticker" data-svg="mvp" title="MVP 徽章">
+              ⭐
+            </div>
+            <div class="sticker" data-svg="cheer" title="CHEER 橫幅">
+              📣
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button id="btnClearStickers" class="danger">清空貼圖</button>
+          </div>
+        </section>
+
+        <section class="card panel">
+          <h3 style="margin:6px 0 10px">相框標題</h3>
+          <div class="row">
+            <input id="titleInput" type="text" value="TAIWAN BASEBALL NIGHT" style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06); color:#fff"/>
+            <button id="btnApplyTitle">套用</button>
+          </div>
+          <p class="hint">也可改右下角隊徽字母：<input id="badgeInput" type="text" value="T" maxlength="2" style="width:48px; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06); color:#fff; margin-left:6px"></p>
+        </section>
+
+        <section class="card panel">
+          <h3 style="margin:6px 0 10px">說明</h3>
+          <ol style="margin:0 0 4px 18px; line-height:1.7">
+            <li>按「啟動鏡頭」，允許使用相機（需 HTTPS 或本機）。</li>
+            <li>拖曳貼圖到取景畫面，調整位置。</li>
+            <li>可切換前／後鏡頭、鏡像、倒數。</li>
+            <li>按「拍照」→ 檢查 → 下載 PNG。</li>
+            <li>將本檔上傳到 GitHub Pages / Netlify / Vercel 即可使用。</li>
+          </ol>
+        </section>
+      </aside>
+    </div>
+
+    <div class="footer">© 2025 Polaroid Baseball – 全前端處理，不上傳任何影像到伺服器。</div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const overlay = document.getElementById('overlay');
+    const stage = document.getElementById('stage');
+    const stickerLayer = document.getElementById('stickerLayer');
+
+    const btnStart = document.getElementById('btnStart');
+    const btnSwitch = document.getElementById('btnSwitch');
+    const btnSnap = document.getElementById('btnSnap');
+    const btnRetake = document.getElementById('btnRetake');
+    const btnDownload = document.getElementById('btnDownload');
+    const chkMirror = document.getElementById('chkMirror');
+    const chkCountdown = document.getElementById('chkCountdown');
+    const frameOpacity = document.getElementById('frameOpacity');
+
+    const titleInput = document.getElementById('titleInput');
+    const btnApplyTitle = document.getElementById('btnApplyTitle');
+    const badgeInput = document.getElementById('badgeInput');
+
+    const badge = document.getElementById('badge');
+
+    let stream = null;
+    let usingFront = true; // true: user (前鏡頭), false: environment (後鏡頭)
+    let ticking = null;
+    let startTime = null;
+
+    function updateBadge(){
+      if(!startTime) return;
+      const sec = Math.floor((performance.now() - startTime)/1000);
+      const m = String(Math.floor(sec/60)).padStart(2,'0');
+      const s = String(sec%60).padStart(2,'0');
+      badge.textContent = `LIVE\u2006•\u2006${m}:${s}`;
+    }
+
+    function raf(){
+      updateBadge();
+      ticking = requestAnimationFrame(raf);
+    }
+
+    function stopRaf(){ if(ticking) cancelAnimationFrame(ticking); }
+
+    async function startCamera(){
+      try{
+        if(stream){ stream.getTracks().forEach(t=>t.stop()); }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: usingFront ? 'user' : 'environment' },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        startTime = performance.now();
+        raf();
+      }catch(err){
+        alert('開啟相機失敗：' + err.message + '\n請確認已在 HTTPS 或本機，並允許使用相機。');
+      }
+    }
+
+    function switchCamera(){
+      usingFront = !usingFront; startCamera();
+    }
+
+    chkMirror.addEventListener('change', ()=>{
+      video.style.transform = chkMirror.checked ? 'scaleX(-1)' : 'none';
+    });
+    // 初始鏡像（自拍常用）
+    video.style.transform = 'scaleX(-1)';
+
+    frameOpacity.addEventListener('input', ()=>{
+      overlay.style.opacity = (frameOpacity.value/100).toString();
+    });
+    overlay.style.opacity = (frameOpacity.value/100).toString();
+
+    btnStart.addEventListener('click', startCamera);
+    btnSwitch.addEventListener('click', switchCamera);
+
+    // 動態修改相框標題與隊徽
+    btnApplyTitle.addEventListener('click', ()=>{
+      const svg = overlay.querySelector('svg');
+      const titleNode = svg.querySelector('text');
+      if(titleNode) titleNode.textContent = titleInput.value || '';
+      const emblem = svg.querySelector('g[transform="translate(980,760)"] text');
+      if (emblem) emblem.textContent = (badgeInput.value || 'T').slice(0,2).toUpperCase();
+    });
+
+    // 倒數工具
+    function countdown(sec=3){
+      return new Promise(resolve=>{
+        if(!chkCountdown.checked){ resolve(); return; }
+        const el = document.createElement('div');
+        el.style.position='absolute'; el.style.inset='0'; el.style.display='grid'; el.style.placeItems='center';
+        el.style.fontSize='80px'; el.style.fontWeight='900'; el.style.background='rgba(0,0,0,.35)';
+        let n = sec;
+        el.textContent = n;
+        stage.appendChild(el);
+        const iv = setInterval(()=>{
+          n--; if(n<=0){ clearInterval(iv); stage.removeChild(el); resolve(); }
+          else el.textContent = n;
+        },1000);
+      });
+    }
+
+    // 產生拍照輸出
+    async function snap(){
+      if(!video.srcObject){ alert('請先啟動鏡頭'); return; }
+      await countdown(3);
+      const rect = stage.getBoundingClientRect();
+      const w = Math.round(rect.width * devicePixelRatio);
+      const h = Math.round(rect.height * devicePixelRatio);
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      // 視訊到畫布
+      // 計算鏡像與縮放
+      ctx.save();
+      if(chkMirror.checked){
+        ctx.translate(w,0); ctx.scale(-1,1);
+      }
+      // 將 video 畫到 canvas，維持 cover 效果
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const arVideo = vw/vh;
+      const arCanvas = w/h;
+      let dw, dh, dx, dy;
+      if(arVideo > arCanvas){ // 視訊較寬
+        dh = h; dw = dh * arVideo; dx = (w - dw)/2; dy = 0;
+      }else{ // 視訊較高
+        dw = w; dh = dw / arVideo; dx = 0; dy = (h - dh)/2;
+      }
+      ctx.drawImage(video, dx, dy, dw, dh);
+      ctx.restore();
+
+      // 疊上貼圖（可拖曳）
+      await drawStickerLayerToCanvas(ctx, w, h);
+
+      // 疊上相框（以目前 overlay SVG 轉為影像）
+      await drawOverlayToCanvas(ctx, w, h);
+
+      // 顯示快照
+      canvas.classList.remove('hidden');
+      stickerLayer.classList.remove('hidden');
+      btnRetake.classList.remove('hidden');
+      btnDownload.classList.remove('hidden');
+    }
+
+    btnSnap.addEventListener('click', snap);
+
+    // 重拍
+    btnRetake.addEventListener('click', ()=>{
+      canvas.classList.add('hidden');
+      btnRetake.classList.add('hidden');
+      btnDownload.classList.add('hidden');
+    });
+
+    // 下載
+    btnDownload.addEventListener('click', ()=>{
+      const a = document.createElement('a');
+      a.download = `baseball-polaroid-${Date.now()}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    });
+
+    // ---- 將 overlay SVG 轉圖並畫到 canvas ----
+    function svgToDataURL(svgEl){
+      const s = new XMLSerializer().serializeToString(svgEl);
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+    }
+
+    function drawImageElement(ctx, img, w, h){
+      return new Promise(res=>{ img.onload = ()=>{ ctx.globalAlpha = parseFloat(getComputedStyle(overlay).opacity); ctx.drawImage(img, 0, 0, w, h); ctx.globalAlpha = 1; res(); }; img.onerror=res; });
+    }
+
+    async function drawOverlayToCanvas(ctx, w, h){
+      const svg = overlay.querySelector('svg');
+      const img = new Image();
+      img.src = svgToDataURL(svg);
+      await drawImageElement(ctx, img, w, h);
+    }
+
+    // ---- 貼圖系統：點選加入、可拖曳、合成輸出 ----
+    const palette = document.getElementById('stickerPalette');
+    const btnClear = document.getElementById('btnClearStickers');
+
+    const SVGs = {
+      ball: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' width='120' height='120'>
+        <circle cx='60' cy='60' r='56' fill='white' stroke='#e5e5e5' stroke-width='4'/>
+        <path d='M28,18 C44,36 44,84 28,102' stroke='#d23a3a' stroke-width='5' fill='none' stroke-linecap='round'/>
+        <path d='M92,18 C76,36 76,84 92,102' stroke='#d23a3a' stroke-width='5' fill='none' stroke-linecap='round'/>
+        <g stroke='#d23a3a' stroke-width='5' stroke-linecap='round'>
+          <path d='M35,30 l18,-8'/><path d='M35,46 l18,-8'/><path d='M35,62 l18,-8'/><path d='M35,78 l18,-8'/><path d='M35,94 l18,-8'/>
+          <path d='M85,30 l-18,-8'/><path d='M85,46 l-18,-8'/><path d='M85,62 l-18,-8'/><path d='M85,78 l-18,-8'/><path d='M85,94 l-18,-8'/>
+        </g>
+      </svg>`,
+      bat: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 60' width='200' height='60'>
+        <rect x='10' y='22' rx='8' ry='8' width='160' height='16' fill='#b07d47' stroke='#8d6336' stroke-width='3'/>
+        <rect x='160' y='18' rx='6' ry='6' width='28' height='24' fill='#272a33'/>
+      </svg>`,
+      capT: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 90' width='140' height='90'>
+        <path d='M10,70 q60,-80 120,0 z' fill='#1b2a4b' stroke='#0e1733' stroke-width='4'/>
+        <rect x='60' y='62' width='60' height='10' rx='5' fill='#0e1733' />
+        <text x='70' y='55' text-anchor='middle' font-size='42' font-family='Segoe UI, Arial' fill='#fff' font-weight='800'>T</text>
+      </svg>`,
+      mvp: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' width='120' height='120'>
+        <circle cx='60' cy='60' r='50' fill='#ffd95c' stroke='#e6b700' stroke-width='6'/>
+        <text x='60' y='72' text-anchor='middle' font-size='40' font-family='Segoe UI, Arial' fill='#1b2a4b' font-weight='900'>MVP</text>
+      </svg>`,
+      cheer: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 260 80' width='260' height='80'>
+        <rect x='4' y='8' rx='12' ry='12' width='252' height='64' fill='#ff4d6d'/>
+        <text x='130' y='56' text-anchor='middle' font-size='42' font-family='Segoe UI, Arial' fill='#fff' font-weight='900'>CHEER</text>
+      </svg>`
+    };
+
+    palette.addEventListener('click', (e)=>{
+      const item = e.target.closest('.sticker');
+      if(!item) return;
+      const key = item.getAttribute('data-svg');
+      const wrap = document.createElement('div');
+      wrap.className = 'draggable';
+      wrap.innerHTML = SVGs[key] || '';
+      wrap.style.width = '160px';
+      wrap.style.touchAction = 'none';
+      stage.appendChild(wrap);
+      enableDrag(wrap);
+    });
+
+    btnClear.addEventListener('click', ()=>{
+      stage.querySelectorAll('.draggable').forEach(n=>n.remove());
+    });
+
+    function enableDrag(el){
+      let startX=0, startY=0, origX=0, origY=0, dragging=false;
+      function pos(clientX, clientY){ return { x: clientX, y: clientY }; }
+      function onDown(ev){
+        dragging=true; el.style.cursor='grabbing';
+        const p = (ev.touches? ev.touches[0]: ev);
+        startX = p.clientX; startY = p.clientY;
+        const r = el.getBoundingClientRect();
+        const parent = stage.getBoundingClientRect();
+        origX = r.left - parent.left; origY = r.top - parent.top;
+        ev.preventDefault();
+      }
+      function onMove(ev){ if(!dragging) return; const p=(ev.touches? ev.touches[0]: ev);
+        const dx = p.clientX - startX; const dy = p.clientY - startY;
+        el.style.left = (origX + dx) + 'px'; el.style.top = (origY + dy) + 'px';
+      }
+      function onUp(){ dragging=false; el.style.cursor='move'; }
+      el.addEventListener('mousedown', onDown); document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+      el.addEventListener('touchstart', onDown, {passive:false}); document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+    }
+
+    // 將舞台上的貼圖（.draggable）以目前畫面位置合成到 canvas
+    async function drawStickerLayerToCanvas(ctx, w, h){
+      const nodes = Array.from(stage.querySelectorAll('.draggable'));
+      for(const el of nodes){
+        // 將 DOM 內的 SVG 轉成影像，再依據其在舞台的像素位置繪製
+        const svg = el.querySelector('svg');
+        if(!svg) continue;
+        const r = el.getBoundingClientRect();
+        const parent = stage.getBoundingClientRect();
+        const x = (r.left - parent.left) * devicePixelRatio;
+        const y = (r.top - parent.top) * devicePixelRatio;
+        const wEl = r.width * devicePixelRatio;
+        const hEl = r.height * devicePixelRatio;
+        const img = new Image();
+        img.src = svgToDataURL(svg);
+        await new Promise(res=>{ img.onload=()=>{ ctx.drawImage(img, x, y, wEl, hEl); res(); }; img.onerror=res; });
+      }
+    }
+
+    // 初始將 stickerLayer 用不到，保留以便擴充（例如拍後再調整）
+
+    // 啟動後自動調整 video 尺寸比例（CSS 已做 cover，這裡保留鉤子）
+  </script>
+</body>
+</html>
